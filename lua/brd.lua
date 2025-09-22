@@ -11,6 +11,7 @@ M.setup = function(user_config)
 
     if plugin_config.debugmaster then
         local dm = require("debugmaster")
+        M.term = require("terminal.debugmaster")
 
         dm.keys.get("x").key = "dp"
 
@@ -49,6 +50,8 @@ M.setup = function(user_config)
             action = M.run,
             desc = "",
         })
+    else
+        M.term = require("terminal.basic")
     end
 end
 
@@ -56,8 +59,6 @@ local co = coroutine
 local config_dir = nil
 local config = nil
 local target = nil
-
-M.term = require("terminal.basic")
 
 local function co_select(items, opts)
     local thread = co.running()
@@ -140,7 +141,8 @@ local function br(what)
 end
 
 local function debug_impl()
-    require("dap").run(M.dap_configurations[get_debug_configuration()])
+    require("dap").terminate()
+    require("dap").run(M.dap_configurations[get_debug_configuration()], {new = true})
 end
 
 local function debug()
@@ -166,12 +168,12 @@ local function build_and_debug()
     local bad_group = vim.api.nvim_create_augroup("bad_group", {})
     vim.api.nvim_create_autocmd({ 'TermRequest' }, {
         callback = function(ev)
+            vim.api.nvim_clear_autocmds({ group = bad_group })
             if string.sub(ev.data.sequence, 1, 8) == '\x1b]133;D;' then
                 if string.sub(ev.data.sequence, 9) == "0" then
                     vim.schedule(M.term.close_terminal)
                     debug_impl()
                 end
-                vim.api.nvim_clear_autocmds({ group = bad_group })
             end
         end,
         group = bad_group
@@ -254,6 +256,13 @@ vim.api.nvim_create_user_command("BrdCmake",
         table.remove(lines_to_insert)
         vim.api.nvim_buf_set_lines(0, 1, 1, true, lines_to_insert)
     end, { nargs = 1 })
+
+
+vim.api.nvim_create_user_command("BrdConfig",
+    function(opts)
+        get_config_directory()
+        vim.cmd.edit(config_dir .. "/.brd.lua")
+    end, { nargs = 0 })
 
 
 return M
