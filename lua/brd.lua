@@ -66,7 +66,7 @@ local function co_select(items, opts)
     return choice
 end
 
-local function get_config_directory() -- has to be run inside coroutine
+local get_config = function()
     local config_dir = vim.fs.root(vim.fn.getcwd(), ".brd.lua")
     if config_dir == nil then
         local create_file = co_select({ "yes", "no" },
@@ -78,18 +78,17 @@ local function get_config_directory() -- has to be run inside coroutine
         vim.api.nvim_buf_set_lines(0, 0, 0, true, { "return {", "}" })
         vim.api.nvim_win_set_cursor(0, { 1, 0 })
         vim.cmd.write()
+        config_dir = vim.fs.root(vim.fn.getcwd(), ".brd.lua")
     end
-    return config_dir
-end
-
-local get_config = function()
-    local config_dir = get_config_directory()
+    if config_dir == nil then
+        print("config not found")
+        return nil, nil
+    end
     local config = dofile(config_dir .. "/.brd.lua")
-    return config
+    return config, config_dir
 end
 
-local function is_target_ok(target)
-    local config = get_config()
+local function is_target_ok(config, target)
     for k, _ in pairs(config) do
         if target == k then
             return true
@@ -99,8 +98,7 @@ local function is_target_ok(target)
 end
 
 
-local function choose_target()
-    local config = get_config()
+local function choose_target(config)
     local targets = {}
     for k, _ in pairs(config) do
         table.insert(targets, k)
@@ -112,9 +110,9 @@ local function choose_target()
     end
 end
 
-local function get_target()
-    if _target == nil or not is_target_ok(_target) then
-        choose_target()
+local function get_target(config)
+    if _target == nil or not is_target_ok(config, _target) then
+        choose_target(config)
     end
     return _target
 end
@@ -135,159 +133,204 @@ local function normalize_path(config_dir, path)
     end
 end
 
--- M.get_dir = function()
---     return config_dir .. "/" .. config[_target]["dir"]
--- end
+M.get_debug_executable = function()
+    local config, config_dir = get_config()
+    if config == nil then
+        print("error while reading config")
+        return
+    end
+    local target = get_target(config)
+    if target == nil then
+        print("target not set")
+        return
+    end
 
--- local function get_debug_configuration()
---     return config[_target]["debug"]["configuration"]
--- end
-
--- M.get_debug_executable = function()
---     return M.get_dir() .. "/" .. config[_target]["debug"]["executable"]
--- end
+    local dir = normalize_path(config_dir, normalize(config[target]["dir"]))
+    local debug_executable = normalize(config[_target]["debug"]["executable"])
+    if debug_executable == nil then
+        print("debug executable not set")
+        return nil
+    end
+    return dir .. "/" .. debug_executable
+end
 
 M.dap_configurations = {
 }
 
--- -- what = "b", "r", "br"
--- local function br(what)
---     get_target()
---     if _target == nil then
---         print("Target is not set. Aborting")
---         return
---     end
---     local exec_string = "brd " .. what .. " " .. _target
---     if M.term.is_buf_terminal() then
---         exec_string = "\03" .. exec_string
---     end
---     M.term.open_terminal()
---     vim.fn.chansend(M.term.term_channel, { exec_string, "" })
--- end
-
--- local function execute_in_terminal(on_success)
---     get_target()
---     if _target == nil then
---         print("Target is not set. Aborting")
---         return
---     end
---     local exec_string = "brd " .. what .. " " .. _target
---     if M.term.is_buf_terminal() then
---         exec_string = "\03" .. exec_string
---     end
---     M.term.open_terminal()
---     vim.fn.chansend(M.term.term_channel, { exec_string, "" })
--- end
-
-
--- local function debug_impl()
---     require("dap").terminate()
---     require("dap").run(M.dap_configurations[get_debug_configuration()], { new = true })
--- end
-
--- local function debug()
---     get_target()
---     if _target == nil then
---         print("Target is not set. Aborting")
---         return
---     end
---     debug_impl()
--- end
-
-local function build_and_debug()
-    get_target()
-    if _target == nil then
-        print("Target is not set. Aborting")
+local function debug(config, target)
+    local debug_configuration = normalize(config[target]["debug"]["configuration"])
+    if debug_configuration == nil then
+        print("debug configuration not found")
         return
     end
-    local exec_string = "brd b " .. _target
-    if M.term.is_buf_terminal() then
-        exec_string = "\03" .. exec_string
-    end
-    M.term.open_terminal()
-    local bad_group = vim.api.nvim_create_augroup("bad_group", {})
-    vim.api.nvim_create_autocmd({ 'TermRequest' }, {
-        callback = function(ev)
-            vim.api.nvim_clear_autocmds({ group = bad_group })
-            print(ev.data.sequence)
-            if string.sub(ev.data.sequence, 1, 8) == '\x1b]133;D;' then
-                if string.sub(ev.data.sequence, 9) == "0" then
-                    vim.schedule(M.term.close_terminal)
-                    debug_impl()
-                end
-            end
-        end,
-        group = bad_group
-    })
-    vim.fn.chansend(M.term.term_channel, { exec_string, "" })
+    require("dap").run(M.dap_configurations[debug_configuration])
 end
 
-local function execute_in_terminal(command, on_success)
-    local command_str
+local function execute_in_terminal(command_dir, command)
+    local command_table
     if type(command) == "table" then
-        command_str = command[1]
-        for i = 2, #command do
-            if string.find(command[i], " ") ~= "fail" then
-                command_str = command_str .. " \"" .. command[i] .. "\""
-            else
-                command_str = command_str .. " " .. command[i]
-            end
-        end
+        command_table = command
     elseif type(command) == "string" then
-        command_str = command
+        command_table = { command }
     else
         print("wrong command type. expected string or table, got", type(command))
     end
+    local command_str = "fish -c \"cd " .. command_dir .. "; \\\r\n" .. table.concat(command_table, " &&\r\n") .. "\""
 
     if M.term.is_buf_terminal() then
         command_str = "\03" .. command_str
     end
     M.term.open_terminal()
     local bad_group = vim.api.nvim_create_augroup("bad_group", {})
+
+    local thread = co.running()
+
     vim.api.nvim_create_autocmd({ 'TermRequest' }, {
         callback = function(ev)
-            vim.api.nvim_clear_autocmds({ group = bad_group })
-            print(ev.data.sequence)
             if string.sub(ev.data.sequence, 1, 8) == '\x1b]133;D;' then
-                if string.sub(ev.data.sequence, 9) == "0" then
-                    vim.schedule(on_success)
-                end
+                vim.api.nvim_clear_autocmds({ group = bad_group })
+                local exit_code = string.sub(ev.data.sequence, 9)
+                co.resume(thread, tonumber(exit_code))
             end
         end,
         group = bad_group
     })
     vim.fn.chansend(M.term.term_channel, { command_str, "" })
+    local result = co.yield(thread)
+    return result
 end
-
-vim.keymap.set("n", "<leader><bs>", function() execute_in_terminal("echo hello", function() vim.print(10) end) end)
 
 local function run_co(f, ...)
     co.resume(co.create(f), ...)
 end
 
-
 M.build = function()
-    run_co(br, "b")
-end
+    run_co(
+        function()
+            local config, config_dir = get_config()
+            if config == nil then
+                print("error while reading config")
+                return
+            end
+            local target = get_target(config)
+            if target == nil then
+                print("target not set")
+                return
+            end
 
-M.build_and_run = function()
-    run_co(br, "br")
+            local dir = normalize_path(config_dir, normalize(config[target]["dir"]))
+
+            local build = normalize(config[target]["build"])
+            local exit_code = execute_in_terminal(dir, build)
+        end
+    )
 end
 
 M.run = function()
-    run_co(br, "r")
-end
+    run_co(
+        function()
+            local config, config_dir = get_config()
+            if config == nil then
+                print("error while reading config")
+                return
+            end
+            local target = get_target(config)
+            if target == nil then
+                print("target not set")
+                return
+            end
 
-M.build_and_debug = function()
-    run_co(build_and_debug)
+            local dir = normalize_path(config_dir, normalize(config[target]["dir"]))
+
+            local run = normalize(config[target]["run"])
+            local exit_code = execute_in_terminal(dir, run)
+        end
+    )
 end
 
 M.debug = function()
-    run_co(debug)
+    run_co(
+        function()
+            local config, config_dir = get_config()
+            if config == nil then
+                print("error while reading config")
+                return
+            end
+            local target = get_target(config)
+            if target == nil then
+                print("target not set")
+                return
+            end
+
+            debug(config, target)
+        end
+    )
 end
 
+M.build_and_run = function()
+    run_co(
+        function()
+            local config, config_dir = get_config()
+            if config == nil then
+                print("error while reading config")
+                return
+            end
+            local target = get_target(config)
+            if target == nil then
+                print("target not set")
+            end
+
+            local command_dir = normalize_path(config_dir, normalize(config[target]["dir"]))
+
+            local build = normalize(config[target]["build"])
+            local exit_code = execute_in_terminal(command_dir, build)
+
+            if exit_code == 0 then
+                local run = normalize(config[target]["run"])
+                exit_code = execute_in_terminal(command_dir, run)
+            end
+        end
+    )
+end
+
+
+M.build_and_debug = function()
+    run_co(
+        function()
+            local config, config_dir = get_config()
+            if config == nil then
+                print("error while reading config")
+                return
+            end
+            local target = get_target(config)
+            if target == nil then
+                print("target not set")
+                return
+            end
+
+            local dir = normalize_path(config_dir, normalize(config[target]["dir"]))
+
+            local build = normalize(config[target]["build"])
+            local exit_code = execute_in_terminal(dir, build)
+
+            if exit_code == 0 then
+                M.term.close_terminal()
+                debug(config, target)
+            end
+        end
+    )
+end
+
+
 M.choose_target = function()
-    run_co(choose_target)
+    run_co(function()
+        local config = get_config()
+        if config == nil then
+            print("config not found")
+            return
+        end
+        choose_target(config)
+    end)
 end
 
 local bad_cmake_targets = { "^following are some of the valid targets for this Makefile:$",
@@ -295,7 +338,7 @@ local bad_cmake_targets = { "^following are some of the valid targets for this M
     "^edit_cache$", "^rebuild_cache$", ".*%.i$", ".*%.o$", ".*%.s$" }
 
 local cmake_target_template = [[
-    $TARGET = {
+    $DIR_$TARGET = {
         dir = "$DIR",
         build = "cmake --build . --target $TARGET",
         run = "./$TARGET",
@@ -340,8 +383,10 @@ vim.api.nvim_create_user_command("BrdCmake",
 
 vim.api.nvim_create_user_command("BrdConfig",
     function(opts)
-        get_config_directory()
-        vim.cmd.edit(config_dir .. "/.brd.lua")
+        run_co(function()
+            local config, config_dir = get_config()
+            vim.cmd.edit(config_dir .. "/.brd.lua")
+        end)
     end, { nargs = 0 })
 
 
