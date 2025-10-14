@@ -16,39 +16,45 @@ M.setup = function(user_config)
         dm.keys.get("x").key = "dp"
 
         dm.keys.add({
-            key = "s",
-            action = M.choose_target,
-            desc = "",
-        })
-
-        dm.keys.add({
-            key = "C",
-            action = M.term.open_terminal,
-            desc = "",
-        })
-
-        dm.keys.add({
-            key = "p",
-            action = M.build_and_debug,
-            desc = "",
-        })
-
-        dm.keys.add({
-            key = "P",
-            action = M.debug,
-            desc = "",
-        })
-
-        dm.keys.add({
-            key = "x",
-            action = M.build_and_run,
-            desc = "",
+            key = "J",
+            action = M.build,
+            desc = "build",
         })
 
         dm.keys.add({
             key = "X",
             action = M.run,
-            desc = "",
+            desc = "run",
+        })
+
+        dm.keys.add({
+            key = "P",
+            action = M.debug,
+            desc = "debug",
+        })
+
+        dm.keys.add({
+            key = "x",
+            action = M.build_and_run,
+            desc = "build and run",
+        })
+
+        dm.keys.add({
+            key = "p",
+            action = M.build_and_debug,
+            desc = "build and debug",
+        })
+
+        dm.keys.add({
+            key = "s",
+            action = M.choose_target,
+            desc = "choose target",
+        })
+
+        dm.keys.add({
+            key = "C",
+            action = M.term.open_terminal,
+            desc = "open (C)onsole",
         })
     else
         M.term = require("terminal.basic")
