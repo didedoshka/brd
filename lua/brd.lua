@@ -132,7 +132,7 @@ end
 
 local function normalize_path(config_dir, path)
     local normalized_path = vim.fs.normalize(path)
-    if normalized_path[0] == '/' then
+    if string.sub(normalized_path, 1, 1) == '/' then
         return normalized_path
     else
         return vim.fs.joinpath(config_dir, path)
@@ -288,8 +288,11 @@ M.build_and_run = function()
 
             local command_dir = normalize_path(config_dir, normalize(config[target]["dir"]))
 
+            local exit_code = 0
             local build = normalize(config[target]["build"])
-            local exit_code = execute_in_terminal(command_dir, build)
+            if not (build == "" or build == nil) then
+                exit_code = execute_in_terminal(command_dir, build)
+            end
 
             if exit_code == 0 then
                 local run = normalize(config[target]["run"])
@@ -358,8 +361,10 @@ local cmake_target_template = [[
 
 vim.api.nvim_create_user_command("BrdCmake",
     function(opts)
+        local config, config_dir = get_config()
         local build_directory_path = opts["fargs"][1]
-        local obj = vim.system({ "cmake", "--build", build_directory_path, "--target", "help" }, { text = true }):wait()
+        local obj = vim.system({ "cmake", "--build", config_dir .. "/" .. build_directory_path, "--target", "help" },
+            { text = true }):wait()
         if obj["code"] ~= 0 then
             print("Failed with exit code " .. obj["code"])
         end
